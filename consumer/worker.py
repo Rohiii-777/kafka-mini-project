@@ -7,6 +7,7 @@ from db import SessionLocal, User, init_db
 
 load_dotenv()
 init_db()
+SUPPORTED_VERSIONS = {1}
 
 consumer = Consumer({
     "bootstrap.servers": os.getenv("KAFKA_BOOTSTRAP_SERVERS"),
@@ -38,6 +39,23 @@ def send_to_dlq(event, reason):
     )
     producer.flush()
 
+def parse_user_created_event(event: dict) -> dict:
+    """
+    Returns normalized user data.
+    Raises ValueError for unsupported schema.
+    """
+
+    # New versioned event
+    if "event_version" in event:
+        version = event["event_version"]
+
+        if version not in SUPPORTED_VERSIONS:
+            raise ValueError(f"Unsupported event version: {version}")
+
+        return event["data"]
+
+    # Legacy event (pre-versioning)
+    return event
 
 while True:
     msg = consumer.poll(1.0)
@@ -53,13 +71,8 @@ while True:
     try:
         event = json.loads(msg.value().decode())
 
-        # backward compatibility
-        if "data" in event:
-            data = event["data"]
-        else:
-            data = event
+        data = parse_user_created_event(event)
 
-        # simulate failure
         if data["email"].endswith("@fail.com"):
             raise ValueError("Simulated processing failure")
 
