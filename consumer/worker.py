@@ -2,12 +2,14 @@ import json
 import os
 from confluent_kafka import Consumer, Producer
 from dotenv import load_dotenv
-
+import time
 from db import SessionLocal, User, init_db
 
 load_dotenv()
 init_db()
 SUPPORTED_VERSIONS = {1}
+MAX_RETRIES = 3
+RETRY_BACKOFF_SECONDS = 2
 
 consumer = Consumer({
     "bootstrap.servers": os.getenv("KAFKA_BOOTSTRAP_SERVERS"),
@@ -68,30 +70,39 @@ while True:
 
     session = SessionLocal()
 
-    try:
-        event = json.loads(msg.value().decode())
+    event = json.loads(msg.value().decode())
 
-        data = parse_user_created_event(event)
+    for attempt in range(1, MAX_RETRIES + 1):
+        session = SessionLocal()
 
-        if data["email"].endswith("@fail.com"):
-            raise ValueError("Simulated processing failure")
+        try:
+            data = parse_user_created_event(event)
 
-        user = User(
-            user_id=data["user_id"],
-            email=data["email"],
-            name=data["name"],
-        )
+            if data["email"].endswith("@fail.com"):
+                raise ValueError("Simulated processing failure")
 
-        session.merge(user)
-        session.commit()
+            user = User(
+                user_id=data["user_id"],
+                email=data["email"],
+                name=data["name"],
+            )
 
-        print("User persisted:", data["user_id"])
+            session.merge(user)
+            session.commit()
 
+            print(f"User persisted: {data['user_id']} (attempt {attempt})")
+            break  # success → exit retry loop
 
-    except Exception as e:
-        session.rollback()
-        print("Error:", e)
-        send_to_dlq(event, str(e))
+        except Exception as e:
+            session.rollback()
+            print(f"Error on attempt {attempt}: {e}")
 
-    finally:
-        session.close()
+            if attempt == MAX_RETRIES:
+                send_to_dlq(event, str(e))
+                print("Sent to DLQ")
+            else:
+                time.sleep(RETRY_BACKOFF_SECONDS)
+
+        finally:
+            session.close()
+
