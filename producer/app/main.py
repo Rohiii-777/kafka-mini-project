@@ -17,10 +17,15 @@ def create_user(payload: UserCreate):
     user_id = str(uuid4())
 
     event = {
-        "user_id": user_id,
-        "email": payload.email,
-        "name": payload.name,
+        "event_type": "user.created",
+        "event_version": 1,
+        "data": {
+            "user_id": user_id,
+            "email": payload.email,
+            "name": payload.name,
+        }
     }
+
 
     send_event(
         topic="user.created",

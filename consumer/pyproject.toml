@@ -3,5 +3,6 @@ name = "consumer"
 version = "0.1.0"
 dependencies = [
     "confluent-kafka",
-    "python-dotenv"
+    "python-dotenv",
+    "sqlalchemy"
 ]
